@@ -2,7 +2,7 @@
 
 # Gate2 Travel SDK for iOS
 
-**Complete Flight & Hotel Booking Solution**
+**Complete Flight, Hotel & eSIM Solution**
 
 [![SDK Version](https://img.shields.io/badge/SDK-1.0.0-blue.svg)](https://github.com/gate2travel/Gate2TravelSDK-Distribution)
 [![iOS](https://img.shields.io/badge/iOS-15.0+-orange.svg)](https://developer.apple.com/ios/)
@@ -30,22 +30,25 @@
 
 ## 1. Overview
 
-The Gate2 Travel SDK provides complete flight and hotel booking functionality for iPhone applications. Built with SwiftUI and Swift Concurrency, the SDK handles search, pricing, traveler/guest collection, and booking confirmation.
+The Gate2 Travel SDK provides complete flight, hotel, and eSIM functionality for iPhone applications. Built with SwiftUI and Swift Concurrency, the SDK handles search, pricing, traveler/guest collection, and booking confirmation.
 
 ### Capabilities
 
-| Feature | Flights | Hotels |
-|---------|---------|--------|
-| **Search** | Origin, destination, dates, passengers, class | Location, dates, rooms, guests, nationality |
-| **Real-time Pricing** | Current pricing with fare rules | Room rates with cancellation policies |
-| **Traveler/Guest Management** | Passenger info & documents | Guest details |
-| **Booking Confirmation** | PNR generation | Confirmation number |
-| **Custom Theming** | Brand customization with configurable colors | Brand customization with configurable colors |
-| **Localization** | English, Russian, Azerbaijani | English, Russian, Azerbaijani |
+| Feature | Flights | Hotels | eSIM |
+|---------|---------|--------|------|
+| **Search** | Origin, destination, dates, passengers, class | Location, dates, rooms, guests, nationality | Destination country |
+| **Results** | Current pricing with fare rules | Room rates with cancellation policies | Data plans with validity |
+| **User Info** | Passenger info & documents | Guest details | Email for delivery |
+| **Confirmation** | PNR generation | Confirmation number | QR code + direct install |
+| **Custom Theming** | Yes | Yes | Yes |
+| **Localization** | English, Russian, Azerbaijani | English, Russian, Azerbaijani | English, Russian, Azerbaijani |
 
 ### What You Handle
 
-The SDK returns an `orderId` (Flights) or confirmation number (Hotels) via `onComplete`. Your app handles payment processing externally using this identifier.
+The SDK returns an identifier via `onComplete`:
+- **Flights**: `orderId` for payment processing
+- **Hotels**: `confirmationNumber` for payment processing
+- **eSIM**: `orderId` (eSIM delivered via QR code and email)
 
 ---
 
@@ -81,6 +84,7 @@ Task {
 ```swift
 import Gate2TravelFlights
 import Gate2TravelHotels
+import Gate2TravelESim
 
 // Flights
 @MainActor
@@ -88,13 +92,8 @@ func startFlightBooking(from nav: UINavigationController) {
     let flow = FlightsFlow()
     flow.start(
         from: nav,
-        onComplete: { orderId in
-            print("Order: \(orderId)")
-            // Process payment with orderId
-        },
-        onCancel: {
-            nav.popViewController(animated: true)
-        }
+        onComplete: { orderId in print("Order: \(orderId)") },
+        onCancel: { nav.popViewController(animated: true) }
     )
 }
 
@@ -104,12 +103,19 @@ func startHotelBooking(from nav: UINavigationController) {
     let flow = HotelsFlow()
     flow.start(
         from: nav,
-        onComplete: { confirmationNumber in
-            print("Confirmation: \(confirmationNumber)")
-        },
-        onCancel: {
-            nav.popViewController(animated: true)
-        }
+        onComplete: { confirmationNumber in print("Confirmation: \(confirmationNumber)") },
+        onCancel: { nav.popViewController(animated: true) }
+    )
+}
+
+// eSIM
+@MainActor
+func startESimPurchase(from nav: UINavigationController) {
+    let flow = ESimFlow()
+    flow.start(
+        from: nav,
+        onComplete: { orderId in print("eSIM Order: \(orderId)") },
+        onCancel: { nav.popViewController(animated: true) }
     )
 }
 ```
@@ -217,6 +223,7 @@ dependencies: [
         .product(name: "Gate2TravelCore", package: "Gate2TravelSDK-Distribution"),
         .product(name: "Gate2TravelFlights", package: "Gate2TravelSDK-Distribution"),
         .product(name: "Gate2TravelHotels", package: "Gate2TravelSDK-Distribution"),
+        .product(name: "Gate2TravelESim", package: "Gate2TravelSDK-Distribution"),
     ]
 )
 ```
@@ -229,6 +236,7 @@ dependencies: [
 | `Gate2TravelCore` | Networking, configuration, theming, UI components |
 | `Gate2TravelFlights` | Flight search and booking |
 | `Gate2TravelHotels` | Hotel search and booking |
+| `Gate2TravelESim` | eSIM purchase and installation |
 
 ---
 
@@ -326,41 +334,66 @@ public final class HotelsFlow {
 | `onComplete` | Called with confirmation number when booking succeeds |
 | `onCancel` | Called when user cancels |
 
+### ESimFlow
+
+```swift
+@MainActor
+public final class ESimFlow {
+    public init(localization: ESimLocalization = DefaultESimLocalization())
+
+    public func start(
+        from navigationController: UINavigationController,
+        onComplete: @escaping (String) -> Void,
+        onCancel: @escaping () -> Void
+    )
+}
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `navigationController` | UINavigationController to present the flow |
+| `onComplete` | Called with order ID when eSIM purchase succeeds |
+| `onCancel` | Called when user cancels |
+
 ### UIKit Integration
 
 ```swift
 final class BookingViewController: UIViewController {
     private var flightsFlow: FlightsFlow?
     private var hotelsFlow: HotelsFlow?
+    private var esimFlow: ESimFlow?
 
     func startFlights() {
         guard let nav = navigationController else { return }
         let flow = FlightsFlow()
-        flightsFlow = flow  // Retain the flow
-        flow.start(
-            from: nav,
-            onComplete: { [weak self] orderId in
-                self?.handleFlightComplete(orderId)
-            },
-            onCancel: { [weak self] in
-                self?.navigationController?.popToRootViewController(animated: true)
-            }
-        )
+        flightsFlow = flow
+        flow.start(from: nav, onComplete: { [weak self] orderId in
+            self?.handleComplete(orderId)
+        }, onCancel: { [weak self] in
+            self?.navigationController?.popToRootViewController(animated: true)
+        })
     }
 
     func startHotels() {
         guard let nav = navigationController else { return }
         let flow = HotelsFlow()
-        hotelsFlow = flow  // Retain the flow
-        flow.start(
-            from: nav,
-            onComplete: { [weak self] confirmationNumber in
-                self?.handleHotelComplete(confirmationNumber)
-            },
-            onCancel: { [weak self] in
-                self?.navigationController?.popToRootViewController(animated: true)
-            }
-        )
+        hotelsFlow = flow
+        flow.start(from: nav, onComplete: { [weak self] confirmationNumber in
+            self?.handleComplete(confirmationNumber)
+        }, onCancel: { [weak self] in
+            self?.navigationController?.popToRootViewController(animated: true)
+        })
+    }
+
+    func startESim() {
+        guard let nav = navigationController else { return }
+        let flow = ESimFlow()
+        esimFlow = flow
+        flow.start(from: nav, onComplete: { [weak self] orderId in
+            self?.handleComplete(orderId)
+        }, onCancel: { [weak self] in
+            self?.navigationController?.popToRootViewController(animated: true)
+        })
     }
 }
 ```
@@ -372,35 +405,36 @@ The SDK provides ready-to-use SwiftUI views:
 ```swift
 import Gate2TravelFlights
 import Gate2TravelHotels
+import Gate2TravelESim
 
 struct ContentView: View {
     @State private var showFlights = false
     @State private var showHotels = false
+    @State private var showESim = false
 
     var body: some View {
         VStack(spacing: 20) {
             Button("Book Flight") { showFlights = true }
             Button("Book Hotel") { showHotels = true }
+            Button("Buy eSIM") { showESim = true }
         }
         .fullScreenCover(isPresented: $showFlights) {
             FlightsFlowView(
-                onComplete: { orderId in
-                    showFlights = false
-                    // Process payment with orderId
-                },
+                onComplete: { orderId in showFlights = false },
                 onCancel: { showFlights = false }
-            )
-            .ignoresSafeArea()
+            ).ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showHotels) {
             HotelsFlowView(
-                onComplete: { confirmationNumber in
-                    showHotels = false
-                    // Process payment
-                },
+                onComplete: { confirmationNumber in showHotels = false },
                 onCancel: { showHotels = false }
-            )
-            .ignoresSafeArea()
+            ).ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showESim) {
+            ESimFlowView(
+                onComplete: { orderId in showESim = false },
+                onCancel: { showESim = false }
+            ).ignoresSafeArea()
         }
     }
 }
@@ -546,6 +580,7 @@ You can also provide custom localization directly to each flow:
 ```swift
 let flightsFlow = FlightsFlow(localization: MyFlightsLocalization())
 let hotelsFlow = HotelsFlow(localization: MyHotelsLocalization())
+let esimFlow = ESimFlow(localization: MyESimLocalization())
 ```
 
 ---
@@ -587,6 +622,23 @@ SEARCH → RESULTS → DETAIL → GUEST DETAILS → CONFIRMATION
 | **Guest Details** | Enter guest information and contact details |
 | **Confirmation** | Booking confirmation number and details |
 
+### eSIM Flow
+
+```
+DESTINATION → PLANS → DETAIL → CHECKOUT → CONFIRMATION
+                                               │
+                                               ▼
+                                     onComplete(orderId)
+```
+
+| Screen | Purpose |
+|--------|---------|
+| **Destination** | Select country/region for eSIM coverage |
+| **Plans** | Browse data plans (data amount, validity, price) |
+| **Detail** | View coverage, features, device compatibility |
+| **Checkout** | Enter email for eSIM delivery |
+| **Confirmation** | QR code for installation + direct install option (iOS 17.4+) |
+
 ---
 
 ## 10. Sample Code
@@ -598,6 +650,7 @@ import SwiftUI
 import Gate2TravelSDK
 import Gate2TravelFlights
 import Gate2TravelHotels
+import Gate2TravelESim
 
 @main
 struct TravelApp: App {
@@ -635,6 +688,7 @@ struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var showFlights = false
     @State private var showHotels = false
+    @State private var showESim = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -644,6 +698,9 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
 
             Button("Book Hotel") { showHotels = true }
+                .buttonStyle(.bordered)
+
+            Button("Buy eSIM") { showESim = true }
                 .buttonStyle(.bordered)
 
             if let bookingId = appState.lastBookingId {
@@ -657,8 +714,7 @@ struct ContentView: View {
                     showFlights = false
                 },
                 onCancel: { showFlights = false }
-            )
-            .ignoresSafeArea()
+            ).ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showHotels) {
             HotelsFlowView(
@@ -667,8 +723,16 @@ struct ContentView: View {
                     showHotels = false
                 },
                 onCancel: { showHotels = false }
-            )
-            .ignoresSafeArea()
+            ).ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showESim) {
+            ESimFlowView(
+                onComplete: { orderId in
+                    appState.lastBookingId = orderId
+                    showESim = false
+                },
+                onCancel: { showESim = false }
+            ).ignoresSafeArea()
         }
     }
 }
