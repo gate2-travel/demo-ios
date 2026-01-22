@@ -2,7 +2,7 @@
 
 # Gate2 Travel SDK for iOS
 
-**Complete Flight Booking Solution**
+**Complete Flight & Hotel Booking Solution**
 
 [![SDK Version](https://img.shields.io/badge/SDK-1.0.0-blue.svg)](https://github.com/gate2travel/Gate2TravelSDK-Distribution)
 [![iOS](https://img.shields.io/badge/iOS-15.0+-orange.svg)](https://developer.apple.com/ios/)
@@ -22,7 +22,7 @@
 6. [Integration](#6-integration)
 7. [Theming](#7-theming)
 8. [Localization](#8-localization)
-9. [Booking Flow](#9-booking-flow)
+9. [Booking Flows](#9-booking-flows)
 10. [Sample Code](#10-sample-code)
 11. [Support](#11-support)
 
@@ -30,22 +30,22 @@
 
 ## 1. Overview
 
-The Gate2 Travel SDK provides complete flight booking functionality for iPhone applications. Built with SwiftUI and Swift Concurrency, the SDK handles search, pricing, traveler collection, and booking confirmation.
+The Gate2 Travel SDK provides complete flight and hotel booking functionality for iPhone applications. Built with SwiftUI and Swift Concurrency, the SDK handles search, pricing, traveler/guest collection, and booking confirmation.
 
 ### Capabilities
 
-| Feature | Description |
-|---------|-------------|
-| **Flight Search** | Search by origin, destination, dates, passengers, travel class |
-| **Real-time Pricing** | Current pricing with fare rules before booking |
-| **Traveler Management** | Collect and validate passenger information |
-| **Booking Confirmation** | PNR generation and confirmation details |
-| **Custom Theming** | Brand customization with configurable colors |
-| **Localization** | English, Russian, Azerbaijani |
+| Feature | Flights | Hotels |
+|---------|---------|--------|
+| **Search** | Origin, destination, dates, passengers, class | Location, dates, rooms, guests, nationality |
+| **Real-time Pricing** | Current pricing with fare rules | Room rates with cancellation policies |
+| **Traveler/Guest Management** | Passenger info & documents | Guest details |
+| **Booking Confirmation** | PNR generation | Confirmation number |
+| **Custom Theming** | Brand customization with configurable colors | Brand customization with configurable colors |
+| **Localization** | English, Russian, Azerbaijani | English, Russian, Azerbaijani |
 
 ### What You Handle
 
-The SDK returns an `orderId` via `onComplete`. Your app handles payment processing externally using this order ID.
+The SDK returns an `orderId` (Flights) or confirmation number (Hotels) via `onComplete`. Your app handles payment processing externally using this identifier.
 
 ---
 
@@ -58,7 +58,7 @@ In Xcode: **File → Add Package Dependencies** → Enter:
 https://github.com/gate2travel/Gate2TravelSDK-Distribution.git
 ```
 
-Select `Gate2TravelCore` and `Gate2TravelFlights`.
+Select `Gate2TravelSDK` (includes all modules).
 
 ### Step 2: Configure SDK
 
@@ -79,23 +79,38 @@ Task {
 ### Step 3: Start Booking Flow
 
 ```swift
-import Gate2TravelCore
 import Gate2TravelFlights
+import Gate2TravelHotels
 
-func startBooking(from nav: UINavigationController) {
-    Task { @MainActor in
-        let flow = await FlightsFlow()
-        flow.start(
-            from: nav,
-            onComplete: { orderId in
-                print("Order: \(orderId)")
-                // Process payment with orderId
-            },
-            onCancel: {
-                nav.popViewController(animated: true)
-            }
-        )
-    }
+// Flights
+@MainActor
+func startFlightBooking(from nav: UINavigationController) {
+    let flow = FlightsFlow()
+    flow.start(
+        from: nav,
+        onComplete: { orderId in
+            print("Order: \(orderId)")
+            // Process payment with orderId
+        },
+        onCancel: {
+            nav.popViewController(animated: true)
+        }
+    )
+}
+
+// Hotels
+@MainActor
+func startHotelBooking(from nav: UINavigationController) {
+    let flow = HotelsFlow()
+    flow.start(
+        from: nav,
+        onComplete: { confirmationNumber in
+            print("Confirmation: \(confirmationNumber)")
+        },
+        onCancel: {
+            nav.popViewController(animated: true)
+        }
+    )
 }
 ```
 
@@ -187,12 +202,21 @@ dependencies: [
     )
 ]
 
-// Target
+// Target - Option 1: All features
+.target(
+    name: "YourApp",
+    dependencies: [
+        .product(name: "Gate2TravelSDK", package: "Gate2TravelSDK-Distribution"),
+    ]
+)
+
+// Target - Option 2: Individual features
 .target(
     name: "YourApp",
     dependencies: [
         .product(name: "Gate2TravelCore", package: "Gate2TravelSDK-Distribution"),
         .product(name: "Gate2TravelFlights", package: "Gate2TravelSDK-Distribution"),
+        .product(name: "Gate2TravelHotels", package: "Gate2TravelSDK-Distribution"),
     ]
 )
 ```
@@ -201,8 +225,10 @@ dependencies: [
 
 | Package | Description |
 |---------|-------------|
-| `Gate2TravelCore` | Networking, configuration, theming, localization |
-| `Gate2TravelFlights` | Flight booking feature |
+| `Gate2TravelSDK` | Main SDK entry point (includes all modules) |
+| `Gate2TravelCore` | Networking, configuration, theming, UI components |
+| `Gate2TravelFlights` | Flight search and booking |
+| `Gate2TravelHotels` | Hotel search and booking |
 
 ---
 
@@ -213,9 +239,9 @@ dependencies: [
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `apiKey` | `String` | Yes | Your Gate2Travel API key |
-| `theme` | `Theme` | No | Custom theme (default: `.default`) |
-| `logLevels` | `[G2TLogLevel]` | No | Log levels (default: `[.error]`) |
-| `localization` | `SDKLocalizationProvider` | No | Localization provider |
+| `theme` | `Theme` | Yes | Theme configuration (use `.default` or custom) |
+| `logLevels` | `[G2TLogLevel]` | Yes | Array of log levels to enable |
+| `localization` | `SDKLocalizationProvider` | Yes | Localization provider |
 
 ### Example
 
@@ -247,10 +273,12 @@ struct YourApp: App {
 
 | Level | Description |
 |-------|-------------|
-| `.error` | Only errors |
-| `.warning` | Errors and warnings |
-| `.info` | General information |
+| `.error` | Failures and exceptions |
+| `.warning` | Potential issues |
+| `.info` | General information, state changes |
 | `.verbose` | Detailed debugging |
+
+Use an empty array `[]` to disable all logging.
 
 ---
 
@@ -261,7 +289,7 @@ struct YourApp: App {
 ```swift
 @MainActor
 public final class FlightsFlow {
-    public init() async
+    public init(localization: FlightsLocalization = DefaultFlightsLocalization())
 
     public func start(
         from navigationController: UINavigationController,
@@ -277,57 +305,100 @@ public final class FlightsFlow {
 | `onComplete` | Called with order ID when booking succeeds |
 | `onCancel` | Called when user cancels |
 
-### UIKit
+### HotelsFlow
 
 ```swift
-func presentBooking(from nav: UINavigationController) {
-    Task { @MainActor in
-        let flow = await FlightsFlow()
+@MainActor
+public final class HotelsFlow {
+    public init(localization: HotelsLocalization = DefaultHotelsLocalization())
+
+    public func start(
+        from navigationController: UINavigationController,
+        onComplete: @escaping (String) -> Void,
+        onCancel: @escaping () -> Void
+    )
+}
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `navigationController` | UINavigationController to present the flow |
+| `onComplete` | Called with confirmation number when booking succeeds |
+| `onCancel` | Called when user cancels |
+
+### UIKit Integration
+
+```swift
+final class BookingViewController: UIViewController {
+    private var flightsFlow: FlightsFlow?
+    private var hotelsFlow: HotelsFlow?
+
+    func startFlights() {
+        guard let nav = navigationController else { return }
+        let flow = FlightsFlow()
+        flightsFlow = flow  // Retain the flow
         flow.start(
             from: nav,
-            onComplete: { orderId in
-                // Navigate to payment
+            onComplete: { [weak self] orderId in
+                self?.handleFlightComplete(orderId)
             },
-            onCancel: {
-                nav.popViewController(animated: true)
+            onCancel: { [weak self] in
+                self?.navigationController?.popToRootViewController(animated: true)
+            }
+        )
+    }
+
+    func startHotels() {
+        guard let nav = navigationController else { return }
+        let flow = HotelsFlow()
+        hotelsFlow = flow  // Retain the flow
+        flow.start(
+            from: nav,
+            onComplete: { [weak self] confirmationNumber in
+                self?.handleHotelComplete(confirmationNumber)
+            },
+            onCancel: { [weak self] in
+                self?.navigationController?.popToRootViewController(animated: true)
             }
         )
     }
 }
 ```
 
-### SwiftUI
+### SwiftUI Integration
+
+The SDK provides ready-to-use SwiftUI views:
 
 ```swift
-struct FlightsFlowContainer: UIViewControllerRepresentable {
-    let onComplete: (String) -> Void
-    let onCancel: () -> Void
+import Gate2TravelFlights
+import Gate2TravelHotels
 
-    func makeUIViewController(context: Context) -> UINavigationController {
-        let nav = UINavigationController()
-        Task { @MainActor in
-            let flow = await FlightsFlow()
-            flow.start(from: nav, onComplete: onComplete, onCancel: onCancel)
-        }
-        return nav
-    }
-
-    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
-}
-
-// Usage
 struct ContentView: View {
-    @State private var showBooking = false
+    @State private var showFlights = false
+    @State private var showHotels = false
 
     var body: some View {
-        Button("Book Flight") { showBooking = true }
-        .fullScreenCover(isPresented: $showBooking) {
-            FlightsFlowContainer(
+        VStack(spacing: 20) {
+            Button("Book Flight") { showFlights = true }
+            Button("Book Hotel") { showHotels = true }
+        }
+        .fullScreenCover(isPresented: $showFlights) {
+            FlightsFlowView(
                 onComplete: { orderId in
-                    showBooking = false
+                    showFlights = false
+                    // Process payment with orderId
+                },
+                onCancel: { showFlights = false }
+            )
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showHotels) {
+            HotelsFlowView(
+                onComplete: { confirmationNumber in
+                    showHotels = false
                     // Process payment
                 },
-                onCancel: { showBooking = false }
+                onCancel: { showHotels = false }
             )
             .ignoresSafeArea()
         }
@@ -342,48 +413,74 @@ struct ContentView: View {
 ### Structure
 
 ```swift
-public struct Theme {
+public struct Theme: Sendable {
     public let colors: ThemeColors
     public static let `default`: Theme
-}
 
-public struct ThemeColors {
-    public let primary: Color        // Buttons, headers
-    public let secondary: Color      // Accents
-    public let background: Color     // Screen background
-    public let surface: Color        // Cards
-    public let error: Color          // Error states
-    public let onPrimary: Color      // Text on primary
-    public let onSecondary: Color    // Text on secondary
-    public let onBackground: Color   // Text on background
-    public let onSurface: Color      // Text on surface
+    public init(colors: ThemeColors = .default)
 }
 ```
+
+### ThemeColors Properties
+
+| Category | Properties |
+|----------|------------|
+| **Primary** | `primary`, `primaryVariant`, `primarySubtle` |
+| **Secondary** | `secondary`, `secondaryVariant` |
+| **Semantic** | `success`, `successSubtle`, `warning`, `warningSubtle`, `error`, `errorSubtle` |
+| **Background** | `background`, `backgroundSecondary`, `backgroundTertiary` |
+| **Surface** | `surface`, `inputBackground` |
+| **Text** | `textPrimary`, `textSecondary`, `textTertiary`, `textDisabled`, `textOnPrimary` |
+| **Border** | `border`, `borderSubtle`, `borderFocus` |
+| **Icon** | `iconPrimary`, `iconSecondary` |
+| **Overlay** | `scrim` |
 
 ### Example
 
 ```swift
-let theme = Theme(
+import SwiftUI
+
+let customTheme = Theme(
     colors: ThemeColors(
         primary: .blue,
-        secondary: .green,
-        background: .white,
-        surface: Color(white: 0.97),
+        primaryVariant: Color(red: 0.1, green: 0.3, blue: 0.8),
+        primarySubtle: Color.blue.opacity(0.1),
+        secondary: .gray,
+        secondaryVariant: Color(white: 0.3),
+        success: .green,
+        successSubtle: Color.green.opacity(0.1),
+        warning: .orange,
+        warningSubtle: Color.orange.opacity(0.1),
         error: .red,
-        onPrimary: .white,
-        onSecondary: .white,
-        onBackground: .black,
-        onSurface: .gray
+        errorSubtle: Color.red.opacity(0.1),
+        background: .white,
+        backgroundSecondary: Color(white: 0.97),
+        backgroundTertiary: Color(white: 0.95),
+        surface: .white,
+        inputBackground: .white,
+        textPrimary: .black,
+        textSecondary: .gray,
+        textTertiary: Color(white: 0.5),
+        textDisabled: Color(white: 0.7),
+        textOnPrimary: .white,
+        border: Color(white: 0.9),
+        borderSubtle: Color(white: 0.95),
+        borderFocus: .blue,
+        iconPrimary: Color(white: 0.2),
+        iconSecondary: Color(white: 0.5),
+        scrim: Color.black.opacity(0.5)
     )
 )
 
 await Gate2TravelSDK.configure(
     apiKey: "your-api-key",
-    theme: theme,
+    theme: customTheme,
     logLevels: [.error],
     localization: DefaultSDKLocalization()
 )
 ```
+
+The default theme automatically adapts to light/dark mode.
 
 ---
 
@@ -404,12 +501,27 @@ await Gate2TravelSDK.configure(
 
 ### Custom Translations
 
-Implement `SDKLocalizationProvider` with custom `CommonLocalization` and `FlightsLocalization`:
+Implement `SDKLocalizationProvider` with custom localization providers:
 
 ```swift
 struct MyLocalization: SDKLocalizationProvider {
     let common: CommonLocalization = MyCommonLocalization()
     let flights: FlightsLocalization = MyFlightsLocalization()
+}
+
+struct MyCommonLocalization: CommonLocalization {
+    var ok: String { "OK" }
+    var cancel: String { "Cancel" }
+    var error: String { "Error" }
+    var loading: String { "Loading..." }
+    var retry: String { "Retry" }
+    var search: String { "Search" }
+    var done: String { "Done" }
+    var back: String { "Back" }
+    var next: String { "Next" }
+    var confirm: String { "Confirm" }
+    var errorNoConnection: String { "No internet connection" }
+    var errorGeneric: String { "Something went wrong" }
 }
 
 struct MyFlightsLocalization: FlightsLocalization {
@@ -427,30 +539,53 @@ await Gate2TravelSDK.configure(
 )
 ```
 
+### Feature-Specific Localization
+
+You can also provide custom localization directly to each flow:
+
+```swift
+let flightsFlow = FlightsFlow(localization: MyFlightsLocalization())
+let hotelsFlow = HotelsFlow(localization: MyHotelsLocalization())
+```
+
 ---
 
-## 9. Booking Flow
+## 9. Booking Flows
 
-The SDK implements a 5-screen flow:
+### Flights Flow
 
 ```
-SEARCH → DETAIL → TRAVELERS → REVIEW → CONFIRMATION
-                                            │
-                                            ▼
-                                  onComplete(orderId)
+SEARCH → RESULTS → DETAIL → TRAVELERS → REVIEW → CONFIRMATION
+                                                       │
+                                                       ▼
+                                             onComplete(orderId)
 ```
-
-### Screens
 
 | Screen | Purpose |
 |--------|---------|
-| **Search** | Enter origin, destination, dates, passengers, class |
-| **Detail** | Confirm price and availability |
-| **Travelers** | Enter passenger information |
+| **Search** | Enter origin, destination, dates, passengers, cabin class |
+| **Results** | View available flights with sorting options |
+| **Detail** | Confirm price, view itinerary and baggage info |
+| **Travelers** | Enter passenger information and documents |
 | **Review** | Verify all details before booking |
 | **Confirmation** | PNR and order confirmation |
 
-After confirmation, `onComplete(orderId)` is called. Use the order ID for payment processing.
+### Hotels Flow
+
+```
+SEARCH → RESULTS → DETAIL → GUEST DETAILS → CONFIRMATION
+                                                  │
+                                                  ▼
+                                    onComplete(confirmationNumber)
+```
+
+| Screen | Purpose |
+|--------|---------|
+| **Search** | Enter location, dates, rooms, guests, nationality |
+| **Results** | View available hotels with sorting/filtering |
+| **Detail** | Select room, view amenities, cancellation policy |
+| **Guest Details** | Enter guest information and contact details |
+| **Confirmation** | Booking confirmation number and details |
 
 ---
 
@@ -461,8 +596,8 @@ After confirmation, `onComplete(orderId)` is called. Use the order ID for paymen
 ```swift
 import SwiftUI
 import Gate2TravelSDK
-import Gate2TravelCore
 import Gate2TravelFlights
+import Gate2TravelHotels
 
 @main
 struct TravelApp: App {
@@ -493,51 +628,49 @@ struct TravelApp: App {
 
 final class AppState: ObservableObject {
     @Published var isReady = false
-    @Published var orderId: String?
+    @Published var lastBookingId: String?
 }
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showBooking = false
+    @State private var showFlights = false
+    @State private var showHotels = false
 
     var body: some View {
         VStack(spacing: 20) {
             Text("Travel App").font(.largeTitle)
 
-            Button("Book Flight") { showBooking = true }
+            Button("Book Flight") { showFlights = true }
                 .buttonStyle(.borderedProminent)
 
-            if let orderId = appState.orderId {
-                Text("Order: \(orderId)").font(.caption)
+            Button("Book Hotel") { showHotels = true }
+                .buttonStyle(.bordered)
+
+            if let bookingId = appState.lastBookingId {
+                Text("Last Booking: \(bookingId)").font(.caption)
             }
         }
-        .fullScreenCover(isPresented: $showBooking) {
-            FlightsFlowContainer(
+        .fullScreenCover(isPresented: $showFlights) {
+            FlightsFlowView(
                 onComplete: { orderId in
-                    appState.orderId = orderId
-                    showBooking = false
+                    appState.lastBookingId = orderId
+                    showFlights = false
                 },
-                onCancel: { showBooking = false }
+                onCancel: { showFlights = false }
+            )
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showHotels) {
+            HotelsFlowView(
+                onComplete: { confirmationNumber in
+                    appState.lastBookingId = confirmationNumber
+                    showHotels = false
+                },
+                onCancel: { showHotels = false }
             )
             .ignoresSafeArea()
         }
     }
-}
-
-struct FlightsFlowContainer: UIViewControllerRepresentable {
-    let onComplete: (String) -> Void
-    let onCancel: () -> Void
-
-    func makeUIViewController(context: Context) -> UINavigationController {
-        let nav = UINavigationController()
-        Task { @MainActor in
-            let flow = await FlightsFlow()
-            flow.start(from: nav, onComplete: onComplete, onCancel: onCancel)
-        }
-        return nav
-    }
-
-    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
 }
 ```
 
