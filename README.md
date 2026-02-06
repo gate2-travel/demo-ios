@@ -4,7 +4,7 @@
 
 **Complete Flight, Hotel & eSIM Solution**
 
-[![SDK Version](https://img.shields.io/badge/SDK-1.0.0-blue.svg)](https://github.com/gate2travel/Gate2TravelSDK-Distribution)
+[![SDK Version](https://img.shields.io/badge/SDK-1.0.0-blue.svg)](https://github.com/gate2-travel/demo-ios)
 [![iOS](https://img.shields.io/badge/iOS-15.0+-orange.svg)](https://developer.apple.com/ios/)
 [![Swift](https://img.shields.io/badge/Swift-5.9+-purple.svg)](https://swift.org)
 
@@ -58,7 +58,7 @@ The SDK returns an identifier via `onComplete`:
 
 In Xcode: **File → Add Package Dependencies** → Enter:
 ```
-https://github.com/gate2travel/Gate2TravelSDK-Distribution.git
+https://github.com/gate2-travel/demo-ios.git
 ```
 
 Select `Gate2TravelSDK` (includes all modules).
@@ -207,27 +207,16 @@ It validates the input and returns a response indicating whether the payment was
 // Package.swift
 dependencies: [
     .package(
-        url: "https://github.com/gate2travel/Gate2TravelSDK-Distribution.git",
+        url: "https://github.com/gate2-travel/demo-ios.git",
         from: "1.0.0"
     )
 ]
 
-// Target - Option 1: All features
+// Target
 .target(
     name: "YourApp",
     dependencies: [
-        .product(name: "Gate2TravelSDK", package: "Gate2TravelSDK-Distribution"),
-    ]
-)
-
-// Target - Option 2: Individual features
-.target(
-    name: "YourApp",
-    dependencies: [
-        .product(name: "Gate2TravelCore", package: "Gate2TravelSDK-Distribution"),
-        .product(name: "Gate2TravelFlights", package: "Gate2TravelSDK-Distribution"),
-        .product(name: "Gate2TravelHotels", package: "Gate2TravelSDK-Distribution"),
-        .product(name: "Gate2TravelESims", package: "Gate2TravelSDK-Distribution"),
+        .product(name: "Gate2TravelSDK", package: "demo-ios"),
     ]
 )
 ```
@@ -772,7 +761,7 @@ struct ContentView: View {
 
 | Resource | Link |
 |----------|------|
-| GitHub Issues | [github.com/gate2travel/Gate2TravelSDK-Distribution](https://github.com/gate2travel/Gate2TravelSDK-Distribution) |
+| GitHub Issues | [github.com/gate2-travel/demo-ios](https://github.com/gate2-travel/demo-ios) |
 | Email | sdk-support@gate2.travel |
 | Developer Portal | [developers.gate2.travel](https://developers.gate2.travel) |
 
