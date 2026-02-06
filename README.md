@@ -69,22 +69,21 @@ Select `Gate2TravelSDK` (includes all modules).
 import Gate2TravelSDK
 
 // At app launch
-Task {
-    await Gate2TravelSDK.configure(
+do {
+    try Gate2Travel.configure(
         apiKey: "your-api-key",
-        theme: .default,
-        logLevels: [.error],
-        localization: DefaultSDKLocalization()
+        sessionId: "user-session-id",
+        userId: "user-id"
     )
+} catch {
+    print("SDK configuration failed: \(error)")
 }
 ```
 
 ### Step 3: Start Booking Flow
 
 ```swift
-import Gate2TravelFlights
-import Gate2TravelHotels
-import Gate2TravelESim
+import Gate2TravelSDK
 
 // Flights
 @MainActor
@@ -111,11 +110,16 @@ func startHotelBooking(from nav: UINavigationController) {
 // eSIM
 @MainActor
 func startESimPurchase(from nav: UINavigationController) {
-    let flow = ESimFlow()
+    let flow = ESimsFlow()
     flow.start(
         from: nav,
         onComplete: { orderId in print("eSIM Order: \(orderId)") },
-        onCancel: { nav.popViewController(animated: true) }
+        onProcessPayment: { orderId, completion in
+            // Process payment with your provider
+            myPaymentProvider.pay(orderId: orderId) { success in
+                completion(success)
+            }
+        }
     )
 }
 ```
@@ -223,7 +227,7 @@ dependencies: [
         .product(name: "Gate2TravelCore", package: "Gate2TravelSDK-Distribution"),
         .product(name: "Gate2TravelFlights", package: "Gate2TravelSDK-Distribution"),
         .product(name: "Gate2TravelHotels", package: "Gate2TravelSDK-Distribution"),
-        .product(name: "Gate2TravelESim", package: "Gate2TravelSDK-Distribution"),
+        .product(name: "Gate2TravelESims", package: "Gate2TravelSDK-Distribution"),
     ]
 )
 ```
@@ -236,7 +240,7 @@ dependencies: [
 | `Gate2TravelCore` | Networking, configuration, theming, UI components |
 | `Gate2TravelFlights` | Flight search and booking |
 | `Gate2TravelHotels` | Hotel search and booking |
-| `Gate2TravelESim` | eSIM purchase and installation |
+| `Gate2TravelESims` | eSIM purchase and installation |
 
 ---
 
@@ -244,12 +248,15 @@ dependencies: [
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `apiKey` | `String` | Yes | Your Gate2Travel API key |
-| `theme` | `Theme` | Yes | Theme configuration (use `.default` or custom) |
-| `logLevels` | `[G2TLogLevel]` | Yes | Array of log levels to enable |
-| `localization` | `SDKLocalizationProvider` | Yes | Localization provider |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `apiKey` | `String` | Yes | — | Your Gate2Travel API key |
+| `sessionId` | `String` | Yes | — | Current user session identifier |
+| `userId` | `String` | Yes | — | Current user identifier |
+| `theme` | `Theme` | No | `.default` | Theme configuration (use `.default` or custom) |
+| `logLevels` | `[G2TLogLevel]` | No | `[]` | Array of log levels to enable |
+| `localization` | `SDKLocalizationProvider` | No | `DefaultSDKLocalization()` | Localization provider |
+| `language` | `(() -> G2TLanguage)?` | No | `nil` | Closure returning the current language |
 
 ### Example
 
@@ -259,13 +266,15 @@ import Gate2TravelSDK
 @main
 struct YourApp: App {
     init() {
-        Task {
-            await Gate2TravelSDK.configure(
+        do {
+            try Gate2Travel.configure(
                 apiKey: ProcessInfo.processInfo.environment["GATE2_API_KEY"] ?? "",
-                theme: .default,
-                logLevels: [.error, .warning],
-                localization: DefaultSDKLocalization()
+                sessionId: "user-session-id",
+                userId: "user-id",
+                logLevels: [.error, .warning]
             )
+        } catch {
+            print("SDK configuration failed: \(error)")
         }
     }
 
@@ -334,17 +343,17 @@ public final class HotelsFlow {
 | `onComplete` | Called with confirmation number when booking succeeds |
 | `onCancel` | Called when user cancels |
 
-### ESimFlow
+### ESimsFlow
 
 ```swift
 @MainActor
-public final class ESimFlow {
-    public init(localization: ESimLocalization = DefaultESimLocalization())
+public final class ESimsFlow {
+    public init(localization: ESimsLocalization = DefaultESimsLocalization())
 
     public func start(
         from navigationController: UINavigationController,
         onComplete: @escaping (String) -> Void,
-        onCancel: @escaping () -> Void
+        onProcessPayment: @escaping (String, @escaping (Bool) -> Void) -> Void
     )
 }
 ```
@@ -353,7 +362,7 @@ public final class ESimFlow {
 |-----------|-------------|
 | `navigationController` | UINavigationController to present the flow |
 | `onComplete` | Called with order ID when eSIM purchase succeeds |
-| `onCancel` | Called when user cancels |
+| `onProcessPayment` | Called with order ID and a completion handler. Process payment and call `completion(true)` on success or `completion(false)` on failure. |
 
 ### UIKit Integration
 
@@ -361,7 +370,7 @@ public final class ESimFlow {
 final class BookingViewController: UIViewController {
     private var flightsFlow: FlightsFlow?
     private var hotelsFlow: HotelsFlow?
-    private var esimFlow: ESimFlow?
+    private var esimFlow: ESimsFlow?
 
     func startFlights() {
         guard let nav = navigationController else { return }
@@ -387,12 +396,15 @@ final class BookingViewController: UIViewController {
 
     func startESim() {
         guard let nav = navigationController else { return }
-        let flow = ESimFlow()
+        let flow = ESimsFlow()
         esimFlow = flow
         flow.start(from: nav, onComplete: { [weak self] orderId in
             self?.handleComplete(orderId)
-        }, onCancel: { [weak self] in
-            self?.navigationController?.popToRootViewController(animated: true)
+        }, onProcessPayment: { orderId, completion in
+            // Process payment with your provider
+            PaymentService.processPayment(orderId: orderId) { success in
+                completion(success)
+            }
         })
     }
 }
@@ -403,9 +415,7 @@ final class BookingViewController: UIViewController {
 The SDK provides ready-to-use SwiftUI views:
 
 ```swift
-import Gate2TravelFlights
-import Gate2TravelHotels
-import Gate2TravelESim
+import Gate2TravelSDK
 
 struct ContentView: View {
     @State private var showFlights = false
@@ -431,9 +441,13 @@ struct ContentView: View {
             ).ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showESim) {
-            ESimFlowView(
+            ESimsFlowView(
                 onComplete: { orderId in showESim = false },
-                onCancel: { showESim = false }
+                onProcessPayment: { orderId, completion in
+                    PaymentService.processPayment(orderId: orderId) { success in
+                        completion(success)
+                    }
+                }
             ).ignoresSafeArea()
         }
     }
@@ -506,12 +520,16 @@ let customTheme = Theme(
     )
 )
 
-await Gate2TravelSDK.configure(
-    apiKey: "your-api-key",
-    theme: customTheme,
-    logLevels: [.error],
-    localization: DefaultSDKLocalization()
-)
+do {
+    try Gate2Travel.configure(
+        apiKey: "your-api-key",
+        sessionId: "user-session-id",
+        userId: "user-id",
+        theme: customTheme
+    )
+} catch {
+    print("SDK configuration failed: \(error)")
+}
 ```
 
 The default theme automatically adapts to light/dark mode.
@@ -525,12 +543,15 @@ The SDK includes built-in support for English, Russian, and Azerbaijani through 
 ### Default Localization
 
 ```swift
-await Gate2TravelSDK.configure(
-    apiKey: "your-api-key",
-    theme: .default,
-    logLevels: [.error],
-    localization: DefaultSDKLocalization()
-)
+do {
+    try Gate2Travel.configure(
+        apiKey: "your-api-key",
+        sessionId: "user-session-id",
+        userId: "user-id"
+    )
+} catch {
+    print("SDK configuration failed: \(error)")
+}
 ```
 
 ### Custom Translations
@@ -565,12 +586,16 @@ struct MyFlightsLocalization: FlightsLocalization {
     // ... implement all required properties
 }
 
-await Gate2TravelSDK.configure(
-    apiKey: "your-api-key",
-    theme: .default,
-    logLevels: [.error],
-    localization: MyLocalization()
-)
+do {
+    try Gate2Travel.configure(
+        apiKey: "your-api-key",
+        sessionId: "user-session-id",
+        userId: "user-id",
+        localization: MyLocalization()
+    )
+} catch {
+    print("SDK configuration failed: \(error)")
+}
 ```
 
 ### Feature-Specific Localization
@@ -580,7 +605,7 @@ You can also provide custom localization directly to each flow:
 ```swift
 let flightsFlow = FlightsFlow(localization: MyFlightsLocalization())
 let hotelsFlow = HotelsFlow(localization: MyHotelsLocalization())
-let esimFlow = ESimFlow(localization: MyESimLocalization())
+let esimFlow = ESimsFlow(localization: MyESimsLocalization())
 ```
 
 ---
@@ -648,23 +673,22 @@ DESTINATION → PLANS → DETAIL → CHECKOUT → CONFIRMATION
 ```swift
 import SwiftUI
 import Gate2TravelSDK
-import Gate2TravelFlights
-import Gate2TravelHotels
-import Gate2TravelESim
 
 @main
 struct TravelApp: App {
     @StateObject private var appState = AppState()
 
     init() {
-        Task { @MainActor in
-            await Gate2TravelSDK.configure(
+        do {
+            try Gate2Travel.configure(
                 apiKey: ProcessInfo.processInfo.environment["GATE2_API_KEY"] ?? "",
-                theme: .default,
-                logLevels: [.error],
-                localization: DefaultSDKLocalization()
+                sessionId: "user-session-id",
+                userId: "user-id",
+                logLevels: [.error]
             )
             appState.isReady = true
+        } catch {
+            print("SDK configuration failed: \(error)")
         }
     }
 
@@ -726,12 +750,16 @@ struct ContentView: View {
             ).ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showESim) {
-            ESimFlowView(
+            ESimsFlowView(
                 onComplete: { orderId in
                     appState.lastBookingId = orderId
                     showESim = false
                 },
-                onCancel: { showESim = false }
+                onProcessPayment: { orderId, completion in
+                    PaymentService.processPayment(orderId: orderId) { success in
+                        completion(success)
+                    }
+                }
             ).ignoresSafeArea()
         }
     }
