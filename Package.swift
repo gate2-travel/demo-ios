@@ -1,7 +1,7 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-let version = "1.4.0"
+let version = "1.5.0"
 let baseURL = "https://github.com/gate2-travel/demo-ios/releases/download/v\(version)"
 
 let package = Package(
@@ -14,17 +14,17 @@ let package = Package(
         .binaryTarget(
             name: "Gate2TravelCore",
             url: "\(baseURL)/Gate2TravelCore.xcframework.zip",
-            checksum: "5ac2ea9d9062e4c36d8c339b8c7b00081ad28fd1a940a39f9d52c5ec86caac0b"
+            checksum: "c60bdc78a2659823711c01257a0acae407a27f1dca0f880856fbf223d6e687bb"
         ),
         .binaryTarget(
             name: "Gate2TravelESims",
             url: "\(baseURL)/Gate2TravelESims.xcframework.zip",
-            checksum: "edbe535eeacd33e811a96f2865221a72f59a4aeca3f1235b26324f6f3f8ff5a3"
+            checksum: "9a3908cc44829399102e3ba3005ef09237b1bf14a499785ef4746cc863991b96"
         ),
         .binaryTarget(
             name: "Gate2TravelSDK",
             url: "\(baseURL)/Gate2TravelSDK.xcframework.zip",
-            checksum: "0807c76b91d245710268c55fcbb1a4874de509d80df57087993f086f73ea280a"
+            checksum: "2b47dff4379cfaaf2f2cf362530355757f0ff398f82a645e96b7609bef166641"
         ),
     ]
 )
