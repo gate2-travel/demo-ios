@@ -24,7 +24,8 @@
 8. [Localization](#8-localization)
 9. [Booking Flows](#9-booking-flows)
 10. [Sample Code](#10-sample-code)
-11. [Support](#11-support)
+11. [Migration](#11-migration)
+12. [Support](#12-support)
 
 ---
 
@@ -890,7 +891,65 @@ struct ContentView: View {
 
 ---
 
-## 11. Support
+## 11. Migration
+
+### Upgrading to 1.8.0
+
+Most apps need no changes. Two items are source-breaking in narrow cases.
+
+#### `ESimErrorCode` has a new case
+
+`userIdRequired` was added, reported when `showMyESims` is called without a
+`userId`. If you `switch` over `ESimErrorCode` and cover every case with no
+`default`, your switch is no longer exhaustive and will not compile:
+
+```swift
+// Before — compiled against 1.7.0, fails on 1.8.0
+switch error.code {
+case .networkError: …
+case .unknown: …
+}
+
+// After — add @unknown default, and future cases will never break you again
+switch error.code {
+case .networkError: …
+case .unknown: …
+@unknown default: reportUnexpected(error)
+}
+```
+
+You are unaffected if you read `error.message`, read `error.code.rawValue`,
+compare with `==`, or already use `default` / `@unknown default`.
+
+#### `ConfirmOrderResponseDTO.amount` is now `Decimal?`
+
+It was `Double?`. This only affects code using `@_spi(Gate2Internal) import
+Gate2TravelCore` and reading `.amount` — the internal surface, not the supported
+API. Monetary values are `Decimal` throughout the SDK so prices survive decoding
+exactly; `Double` cannot represent most decimal amounts (`2040.88` becomes
+`2040.8800000000000512`).
+
+#### Custom localization: three new strings
+
+If you implement `ESimsLocalization` yourself, three members were added for
+discounted pricing. They have English defaults, so **your code still compiles**
+— but it will ship untranslated English until you override them:
+
+| Member | English default |
+|--------|-----------------|
+| `plansDiscountBadge(_:)` | `20% discount` |
+| `accessibilityDiscountOriginalPrice(_:)` | `Was ₼4.40` |
+| `accessibilityDiscountPercent(_:)` | `20% off` |
+
+### New in 1.8.0
+
+- `ESimsFlow.showMyESims(onProcessPayment:)` — open purchased eSIMs directly
+- `ESimsAvailability` — check SDK and device eSIM support before showing an entry point
+- Discounted pricing on plan cards and plan detail, applied automatically
+
+---
+
+## 12. Support
 
 | Resource | Link |
 |----------|------|
