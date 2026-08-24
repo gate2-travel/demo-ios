@@ -110,17 +110,17 @@ func startHotelBooking(from nav: UINavigationController) {
 // eSIM
 @MainActor
 func startESimPurchase(from nav: UINavigationController) {
-    let flow = ESimsFlow()
-    flow.start(
-        from: nav,
+    let flow = ESimsFlow(
+        navigationController: nav,
         onComplete: { orderId in print("eSIM Order: \(orderId)") },
-        onProcessPayment: { orderId, completion in
-            // Process payment with your provider
-            myPaymentProvider.pay(orderId: orderId) { success in
-                completion(success)
-            }
-        }
+        onFail: { error in print("eSIM error [\(error.code.rawValue)]: \(error.message)") }
     )
+    flow.start(onProcessPayment: { orderId in
+        // Process payment with your provider, then show the activation screen
+        myPaymentProvider.pay(orderId: orderId) { success in
+            if success { flow.showOrderResult(orderId: orderId) }
+        }
+    })
 }
 ```
 
@@ -337,21 +337,103 @@ public final class HotelsFlow {
 ```swift
 @MainActor
 public final class ESimsFlow {
-    public init(localization: ESimsLocalization = DefaultESimsLocalization())
-
-    public func start(
-        from navigationController: UINavigationController,
+    public init(
+        navigationController: UINavigationController,
         onComplete: @escaping (String) -> Void,
-        onProcessPayment: @escaping (String, @escaping (Bool) -> Void) -> Void
+        onFail: @escaping (ESimFlowError) -> Void,
+        localization: ESimsLocalization = DefaultESimsLocalization()
     )
+
+    /// Browse and buy: destination → plans → detail → your payment → activation.
+    public func start(onProcessPayment: @escaping (String) -> Void)
+
+    /// The user's purchased eSIMs, opened directly. Requires `userId` at configure time.
+    public func showMyESims(onProcessPayment: @escaping (String) -> Void)
+
+    /// Activation details for an order. Call after your payment provider confirms.
+    public func showOrderResult(orderId: String)
 }
 ```
 
+The navigation controller and the `onComplete` / `onFail` callbacks are supplied
+once, at init. Each entry point then takes only what is specific to it.
+
 | Parameter | Description |
 |-----------|-------------|
-| `navigationController` | UINavigationController to present the flow |
-| `onComplete` | Called with order ID when eSIM purchase succeeds |
-| `onProcessPayment` | Called with order ID and a completion handler. Process payment and call `completion(true)` on success or `completion(false)` on failure. |
+| `navigationController` | UINavigationController the SDK pushes its screens onto |
+| `onComplete` | Called with the order ID when the user finishes on the activation screen |
+| `onFail` | Called with an `ESimFlowError` on a non-recoverable failure |
+| `onProcessPayment` | Called with the order ID when the SDK needs you to take payment. Process it, then call `showOrderResult(orderId:)`. |
+| `localization` | Optional custom translations — see [Localization](#8-localization) |
+
+> Create a new `ESimsFlow` per entry. The flow retains itself while running, so you
+> do not need to hold a reference. Calling a second entry point on the same instance
+> abandons the first.
+
+#### Entry Points
+
+The SDK is not limited to the full purchase flow — you can open it from wherever it
+fits your app.
+
+| Entry point | Opens at | Use it for |
+|-------------|----------|------------|
+| `start(onProcessPayment:)` | Destination selection | A "Buy an eSIM" button on your home or travel screen |
+| `showMyESims(onProcessPayment:)` | My eSIMs list | An "eSIMs" row in your own orders, wallet, or profile tab |
+| `showOrderResult(orderId:)` | Activation details | Returning from payment, or reopening an order from your order history |
+
+#### My eSIMs
+
+Opens the user's purchased eSIMs directly, skipping browse-and-buy. Each eSIM shows
+its QR code, activation details, and remaining data.
+
+```swift
+let flow = ESimsFlow(
+    navigationController: navigationController,
+    onComplete: { orderId in print("Done: \(orderId)") },
+    onFail: { error in showError(error.message) }
+)
+
+flow.showMyESims(onProcessPayment: { orderId in
+    // Only fires if the user tops up an existing eSIM.
+    myPaymentProvider.pay(orderId: orderId) { success in
+        if success { flow.showOrderResult(orderId: orderId) }
+    }
+})
+```
+
+**Requires a `userId`.** Order history is per-user, so pass `userId` to
+`Gate2Travel.configure(...)` before calling this. If it is missing or blank, nothing
+is pushed and `onFail` reports `ESimErrorCode.userIdRequired` — it will not crash
+your app, but the screen will not open either.
+
+**Top-up.** Active eSIMs show a "Top up" button, which pushes the plans list and
+creates a real add-on order — this is why `onProcessPayment` is required here, even
+though the screen is mostly a listing. If the user has not yet accepted the terms,
+the SDK shows them before the plans list.
+
+### ESimsAvailability
+
+Decide whether to show an eSIM entry point at all. Neither member presents a screen
+or performs a network request.
+
+```swift
+public enum ESimsAvailability {
+    /// The SDK is configured and the eSIM feature can be started.
+    public static var isAvailable: Bool { get }
+
+    /// This device's hardware supports eSIM provisioning.
+    public static var isDeviceESimCapable: Bool { get }
+}
+```
+
+```swift
+if ESimsAvailability.isAvailable && ESimsAvailability.isDeviceESimCapable {
+    showESimTile()
+}
+```
+
+> `isDeviceESimCapable` is always `false` on the Simulator, which has no eUICC. Test
+> device gating on hardware.
 
 ### UIKit Integration
 
@@ -385,14 +467,31 @@ final class BookingViewController: UIViewController {
 
     func startESim() {
         guard let nav = navigationController else { return }
-        let flow = ESimsFlow()
+        let flow = ESimsFlow(
+            navigationController: nav,
+            onComplete: { [weak self] orderId in self?.handleComplete(orderId) },
+            onFail: { [weak self] error in self?.showError(error.message) }
+        )
         esimFlow = flow
-        flow.start(from: nav, onComplete: { [weak self] orderId in
-            self?.handleComplete(orderId)
-        }, onProcessPayment: { orderId, completion in
-            // Process payment with your provider
+        flow.start(onProcessPayment: { orderId in
             PaymentService.processPayment(orderId: orderId) { success in
-                completion(success)
+                if success { flow.showOrderResult(orderId: orderId) }
+            }
+        })
+    }
+
+    /// Opens eSIM history straight from your own orders tab.
+    func showMyESims() {
+        guard let nav = navigationController else { return }
+        let flow = ESimsFlow(
+            navigationController: nav,
+            onComplete: { [weak self] orderId in self?.handleComplete(orderId) },
+            onFail: { [weak self] error in self?.showError(error.message) }
+        )
+        esimFlow = flow
+        flow.showMyESims(onProcessPayment: { orderId in
+            PaymentService.processPayment(orderId: orderId) { success in
+                if success { flow.showOrderResult(orderId: orderId) }
             }
         })
     }
@@ -432,11 +531,10 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showESim) {
             ESimsFlowView(
                 onComplete: { orderId in showESim = false },
-                onProcessPayment: { orderId, completion in
-                    PaymentService.processPayment(orderId: orderId) { success in
-                        completion(success)
-                    }
-                }
+                onProcessPayment: { orderId in
+                    PaymentService.processPayment(orderId: orderId) { _ in }
+                },
+                onFail: { error in showESim = false }
             ).ignoresSafeArea()
         }
     }
@@ -594,7 +692,12 @@ You can also provide custom localization directly to each flow:
 ```swift
 let flightsFlow = FlightsFlow(localization: MyFlightsLocalization())
 let hotelsFlow = HotelsFlow(localization: MyHotelsLocalization())
-let esimFlow = ESimsFlow(localization: MyESimsLocalization())
+let esimFlow = ESimsFlow(
+    navigationController: nav,
+    onComplete: { _ in },
+    onFail: { _ in },
+    localization: MyESimsLocalization()
+)
 ```
 
 ---
@@ -638,20 +741,50 @@ SEARCH → RESULTS → DETAIL → GUEST DETAILS → CONFIRMATION
 
 ### eSIM Flow
 
+The SDK never collects card details. It creates the order, hands you the order ID,
+and waits for you to call `showOrderResult(orderId:)`.
+
 ```
-DESTINATION → PLANS → DETAIL → CHECKOUT → CONFIRMATION
-                                               │
-                                               ▼
-                                     onComplete(orderId)
+start(onProcessPayment:)
+
+  WELCOME → DESTINATION → PLANS → DETAIL
+  (first run)                       │
+                                    ▼
+                          onProcessPayment(orderId)   ← you take payment here
+                                    │
+                                    ▼
+                        showOrderResult(orderId:)
+                                    │
+                                 RESULT
+                                    │
+                                    ▼
+                          onComplete(orderId)
+
+
+showMyESims(onProcessPayment:)
+
+  MY ESIMS → ESIM DETAIL ──"Top up"──▶ PLANS → DETAIL → onProcessPayment(orderId)
 ```
 
 | Screen | Purpose |
 |--------|---------|
-| **Destination** | Select country/region for eSIM coverage |
-| **Plans** | Browse data plans (data amount, validity, price) |
-| **Detail** | View coverage, features, device compatibility |
-| **Checkout** | Enter email for eSIM delivery |
-| **Confirmation** | QR code for installation + direct install option (iOS 17.4+) |
+| **Welcome** | Terms and introduction. Shown once, before the first purchase. |
+| **Destination** | Select country or region for eSIM coverage |
+| **Plans** | Browse data plans — data amount, validity, price, and any discount |
+| **Detail** | Coverage, features, device compatibility, and the buy action |
+| **Result** | QR code for installation + direct install option (iOS 17.4+) |
+| **My eSIMs** | Purchased eSIMs, with data usage and status |
+| **eSIM Detail** | Activation details, install steps, and top-up |
+
+#### Discounted Pricing
+
+When the backend returns a discounted price for a plan, the plan card and the plan
+detail header show the pre-discount price struck through next to the price the user
+actually pays, plus a badge with the percentage off. The Buy Now button shows only
+the payable price.
+
+This is automatic — there is nothing to enable, and the order is created at the
+discounted price.
 
 ---
 
