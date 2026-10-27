@@ -2,11 +2,11 @@
 
 # Gate2 Travel SDK for iOS
 
-**Complete Flight, Hotel & eSIM Solution**
+**eSIM purchase and activation for your app**
 
-[![SDK Version](https://img.shields.io/badge/SDK-1.0.0-blue.svg)](https://github.com/gate2-travel/demo-ios)
+[![SDK Version](https://img.shields.io/badge/SDK-1.9.0-blue.svg)](https://github.com/gate2-travel/demo-ios/releases)
 [![iOS](https://img.shields.io/badge/iOS-15.0+-orange.svg)](https://developer.apple.com/ios/)
-[![Swift](https://img.shields.io/badge/Swift-5.9+-purple.svg)](https://swift.org)
+[![Swift](https://img.shields.io/badge/Swift-6.2+-purple.svg)](https://swift.org)
 
 </div>
 
@@ -20,9 +20,9 @@
 4. [Installation](#4-installation)
 5. [Configuration](#5-configuration)
 6. [Integration](#6-integration)
-7. [Theming](#7-theming)
+7. [Appearance](#7-appearance)
 8. [Localization](#8-localization)
-9. [Booking Flows](#9-booking-flows)
+9. [eSIM Flow](#9-esim-flow)
 10. [Sample Code](#10-sample-code)
 11. [Migration](#11-migration)
 12. [Support](#12-support)
@@ -31,25 +31,27 @@
 
 ## 1. Overview
 
-The Gate2 Travel SDK provides complete flight, hotel, and eSIM functionality for iPhone applications. Built with SwiftUI and Swift Concurrency, the SDK handles search, pricing, traveler/guest collection, and booking confirmation.
+The Gate2 Travel SDK adds a complete eSIM store to your iPhone app. Built with SwiftUI and
+Swift Concurrency, it handles destination search, data plans, order creation, activation,
+and the user's purchased eSIMs. You keep control of payment.
 
 ### Capabilities
 
-| Feature | Flights | Hotels | eSIM |
-|---------|---------|--------|------|
-| **Search** | Origin, destination, dates, passengers, class | Location, dates, rooms, guests, nationality | Destination country |
-| **Results** | Current pricing with fare rules | Room rates with cancellation policies | Data plans with validity |
-| **User Info** | Passenger info & documents | Guest details | Email for delivery |
-| **Confirmation** | PNR generation | Confirmation number | QR code + direct install |
-| **Custom Theming** | Yes | Yes | Yes |
-| **Localization** | English, Russian, Azerbaijani | English, Russian, Azerbaijani | English, Russian, Azerbaijani |
+| Area | What the SDK does |
+|------|-------------------|
+| **Search** | Destination country or region, with promotional banners from your merchant settings |
+| **Plans** | Data plans with validity, price, filters, and discounted prices |
+| **Purchase** | Creates the order and hands you the order ID to take payment |
+| **Activation** | QR code + direct install (iOS 17.4+) |
+| **My eSIMs** | Purchased eSIMs with data usage, activation details, and top-up |
+| **Localization** | English, Russian, Azerbaijani |
 
 ### What You Handle
 
-The SDK returns an identifier via `onComplete`:
-- **Flights**: `orderId` for payment processing
-- **Hotels**: `confirmationNumber` for payment processing
-- **eSIM**: `orderId` (eSIM delivered via QR code and email)
+- **Payment.** The SDK never collects card details. It calls `onProcessPayment(orderId)`;
+  you take payment with your own provider and then show the activation screen.
+- **The result.** `onComplete(orderId)` fires when the user finishes on the activation
+  screen. The eSIM itself is installed in-app via QR code or direct install.
 
 ---
 
@@ -62,7 +64,7 @@ In Xcode: **File → Add Package Dependencies** → Enter:
 https://github.com/gate2-travel/demo-ios.git
 ```
 
-Select `Gate2TravelSDK` (includes all modules).
+Select the `Gate2TravelSDK` product.
 
 ### Step 2: Configure SDK
 
@@ -73,6 +75,7 @@ import Gate2TravelSDK
 do {
     try Gate2Travel.configure(
         apiKey: "your-api-key",
+        environment: .production,
         sessionId: "user-session-id",
         userId: "user-id"
     )
@@ -81,47 +84,31 @@ do {
 }
 ```
 
-### Step 3: Start Booking Flow
+### Step 3: Start the eSIM Flow
 
 ```swift
 import Gate2TravelSDK
 
-// Flights
-@MainActor
-func startFlightBooking(from nav: UINavigationController) {
-    let flow = FlightsFlow()
-    flow.start(
-        from: nav,
-        onComplete: { orderId in print("Order: \(orderId)") },
-        onCancel: { nav.popViewController(animated: true) }
-    )
-}
+final class HomeViewController: UIViewController {
+    private var esimFlow: ESimsFlow?
 
-// Hotels
-@MainActor
-func startHotelBooking(from nav: UINavigationController) {
-    let flow = HotelsFlow()
-    flow.start(
-        from: nav,
-        onComplete: { confirmationNumber in print("Confirmation: \(confirmationNumber)") },
-        onCancel: { nav.popViewController(animated: true) }
-    )
-}
-
-// eSIM
-@MainActor
-func startESimPurchase(from nav: UINavigationController) {
-    let flow = ESimsFlow(
-        navigationController: nav,
-        onComplete: { orderId in print("eSIM Order: \(orderId)") },
-        onFail: { error in print("eSIM error [\(error.code.rawValue)]: \(error.message)") }
-    )
-    flow.start(onProcessPayment: { orderId in
-        // Process payment with your provider, then show the activation screen
-        myPaymentProvider.pay(orderId: orderId) { success in
-            if success { flow.showOrderResult(orderId: orderId) }
-        }
-    })
+    func startESimPurchase() {
+        guard let nav = navigationController else { return }
+        let flow = ESimsFlow(
+            navigationController: nav,
+            onComplete: { orderId in print("eSIM Order: \(orderId)") },
+            onFail: { error in print("eSIM error [\(error.code.rawValue)]: \(error.message)") }
+        )
+        esimFlow = flow
+        flow.start(onProcessPayment: { orderId in
+            // Process payment with your provider, then show the activation screen
+            myPaymentProvider.pay(orderId: orderId) { success in
+                Task { @MainActor in
+                    if success { flow.showOrderResult(orderId: orderId) }
+                }
+            }
+        })
+    }
 }
 ```
 
@@ -132,8 +119,8 @@ func startESimPurchase(from nav: UINavigationController) {
 | Requirement | Version |
 |-------------|---------|
 | iOS | 15.0+ |
-| Swift | 5.9+ |
-| Xcode | 15.0+ |
+| Xcode | 26.2+ (the toolchain releases are built and tested with) |
+| Swift | 6.2+ |
 | Device | iPhone |
 | Orientation | Portrait |
 | Network | Internet required |
@@ -143,18 +130,18 @@ The SDK uses `UINavigationController` for navigation (NavigationStack requires i
 ### Partner Site Payment Service
 
 > ⚠️ **Partner Requirement**
->  
+>
 > This step **must be completed by our partner** before integration can continue.
 
 #### Overview
-The Partner Site Payment Service is used to initiate a payment request in the bank’s core system.  
+The Partner Site Payment Service is used to initiate a payment request in the bank's core system.
 It validates the input and returns a response indicating whether the payment was successfully generated.
 
 ---
 
 #### API Endpoint
 
-*POST* ⁠ /api/v1/core-payment ⁠
+**POST** `/api/v1/core-payment`
 
 ---
 
@@ -162,8 +149,8 @@ It validates the input and returns a response indicating whether the payment was
 
 | Header | Description |
 |------|------------|
-| Content-Type | ⁠ application/json ⁠ |
-| Authorization | ⁠ Bearer <access_token> ⁠ (if required) |
+| Content-Type | `application/json` |
+| Authorization | `Bearer <access_token>` (if required) |
 
 ---
 
@@ -173,7 +160,7 @@ It validates the input and returns a response indicating whether the payment was
 
 | Field | Type | Required | Description |
 |------|------|----------|-------------|
-| currency | string | Yes | ISO 4217 currency code (e.g., USD, EUR, INR) |
+| currency | string | Yes | ISO 4217 currency code (e.g., USD, EUR, AZN) |
 | amount | number | Yes | Payment amount (must be greater than 0) |
 | orderId | string | Yes | Unique order or transaction identifier |
 
@@ -181,23 +168,23 @@ It validates the input and returns a response indicating whether the payment was
 
 ##### Example Request
 
-
-```json 
+```json
 {
   "currency": "USD",
   "amount": 100.50,
   "orderId": "ORD-20260113-001"
 }
 ```
-##### Example Response
 
+##### Example Response
 
 ```json
 {
   "success": true,
-  "amount": “Operation successful"
+  "message": "Operation successful"
 }
 ```
+
 ---
 
 ## 4. Installation
@@ -209,7 +196,7 @@ It validates the input and returns a response indicating whether the payment was
 dependencies: [
     .package(
         url: "https://github.com/gate2-travel/demo-ios.git",
-        from: "1.0.0"
+        from: "1.9.0"
     )
 ]
 
@@ -222,31 +209,32 @@ dependencies: [
 )
 ```
 
-### Packages
+### Package Product
 
-| Package | Description |
-|---------|-------------|
-| `Gate2TravelSDK` | Main SDK entry point (includes all modules) |
-| `Gate2TravelCore` | Networking, configuration, theming, UI components |
-| `Gate2TravelFlights` | Flight search and booking |
-| `Gate2TravelHotels` | Hotel search and booking |
-| `Gate2TravelESims` | eSIM purchase and installation |
+| Product | Contents |
+|---------|----------|
+| `Gate2TravelSDK` | The whole SDK: configuration, networking, and the eSIM feature. `import Gate2TravelSDK` is all you need. |
 
 ---
 
 ## 5. Configuration
+
+Call `Gate2Travel.configure(...)` once, before creating any eSIM screen.
 
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `apiKey` | `String` | Yes | — | Your Gate2Travel API key |
+| `environment` | `G2TServerEnvironment` | Yes | — | `.production` for live apps, `.staging` for testing |
 | `sessionId` | `String` | Yes | — | Current user session identifier |
-| `userId` | `String` | Yes | — | Current user identifier |
-| `theme` | `Theme` | No | `.default` | Theme configuration (use `.default` or custom) |
-| `logLevels` | `[G2TLogLevel]` | No | `[]` | Array of log levels to enable |
-| `localization` | `SDKLocalizationProvider` | No | `DefaultSDKLocalization()` | Localization provider |
-| `language` | `(() -> G2TLanguage)?` | No | `nil` | Closure returning the current language |
+| `userId` | `String` | Yes | — | Current user identifier. Required for My eSIMs and top-up. |
+| `consoleLevels` | `[G2TLogLevel]` | No | `[]` | Log levels printed to the Xcode console |
+| `onLog` | `G2TLogHandler?` | No | `nil` | Receives every SDK log message, at all levels, independent of `consoleLevels` |
+| `localization` | `SDKLocalizationProvider` | No | `DefaultSDKLocalization()` | Not used by eSIM screens — pass custom eSIM strings to the flow instead (see [Localization](#8-localization)) |
+| `language` | `(@Sendable () -> G2TLanguage)?` | No | `nil` | Returns the language to show. Read on every string lookup and request, so screens opened after a change use the new language. `nil` follows the system locale. |
+
+`G2TLanguage` cases: `.english`, `.russian`, `.azerbaijani`.
 
 ### Example
 
@@ -259,9 +247,14 @@ struct YourApp: App {
         do {
             try Gate2Travel.configure(
                 apiKey: ProcessInfo.processInfo.environment["GATE2_API_KEY"] ?? "",
+                environment: .production,
                 sessionId: "user-session-id",
                 userId: "user-id",
-                logLevels: [.error, .warning]
+                consoleLevels: [.error, .info],
+                onLog: { level, message in
+                    MyLogger.log("[\(level.label)] \(message)")
+                },
+                language: { .azerbaijani }
             )
         } catch {
             print("SDK configuration failed: \(error)")
@@ -280,58 +273,20 @@ struct YourApp: App {
 
 | Level | Description |
 |-------|-------------|
-| `.error` | Failures and exceptions |
-| `.warning` | Potential issues |
-| `.info` | General information, state changes |
-| `.verbose` | Detailed debugging |
+| `.error` | Network failures, decoding errors |
+| `.info` | SDK lifecycle, screen navigation, flow events |
+| `.verbose` | User action context: search criteria, selections, prices (no private data) |
 
-Use an empty array `[]` to disable all logging.
+`consoleLevels: []` (the default) turns off console output only. An `onLog` handler, if
+you pass one, still receives every level.
 
 ---
 
 ## 6. Integration
 
-### FlightsFlow
-
-```swift
-@MainActor
-public final class FlightsFlow {
-    public init(localization: FlightsLocalization = DefaultFlightsLocalization())
-
-    public func start(
-        from navigationController: UINavigationController,
-        onComplete: @escaping (String) -> Void,
-        onCancel: @escaping () -> Void
-    )
-}
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `navigationController` | UINavigationController to present the flow |
-| `onComplete` | Called with order ID when booking succeeds |
-| `onCancel` | Called when user cancels |
-
-### HotelsFlow
-
-```swift
-@MainActor
-public final class HotelsFlow {
-    public init(localization: HotelsLocalization = DefaultHotelsLocalization())
-
-    public func start(
-        from navigationController: UINavigationController,
-        onComplete: @escaping (String) -> Void,
-        onCancel: @escaping () -> Void
-    )
-}
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `navigationController` | UINavigationController to present the flow |
-| `onComplete` | Called with confirmation number when booking succeeds |
-| `onCancel` | Called when user cancels |
+> Creating an `ESimsFlow`, `ESimsFlowView`, or `ESimOrderDetailsView` before
+> `Gate2Travel.configure(...)` has succeeded stops the app at runtime. Guard entry points
+> with [`ESimsAvailability.isAvailable`](#esimsavailability).
 
 ### ESimsFlow
 
@@ -363,13 +318,15 @@ once, at init. Each entry point then takes only what is specific to it.
 |-----------|-------------|
 | `navigationController` | UINavigationController the SDK pushes its screens onto |
 | `onComplete` | Called with the order ID when the user finishes on the activation screen |
-| `onFail` | Called with an `ESimFlowError` on a non-recoverable failure |
+| `onFail` | Called with an [`ESimFlowError`](#errors) on a non-recoverable failure |
 | `onProcessPayment` | Called with the order ID when the SDK needs you to take payment. Process it, then call `showOrderResult(orderId:)`. |
 | `localization` | Optional custom translations — see [Localization](#8-localization) |
 
-> Create a new `ESimsFlow` per entry. The flow retains itself while running, so you
-> do not need to hold a reference. Calling a second entry point on the same instance
-> abandons the first.
+> Create a new `ESimsFlow` per entry. The flow keeps itself alive while its screens are
+> showing, and storing it in a property (as the samples do) is also fine. Calling `start`
+> or `showMyESims` again on the same instance abandons the previous flow.
+> `showOrderResult(orderId:)` continues the running flow, or opens the activation screen
+> on its own when called on an instance that has not started one.
 
 #### Entry Points
 
@@ -397,7 +354,9 @@ let flow = ESimsFlow(
 flow.showMyESims(onProcessPayment: { orderId in
     // Only fires if the user tops up an existing eSIM.
     myPaymentProvider.pay(orderId: orderId) { success in
-        if success { flow.showOrderResult(orderId: orderId) }
+        Task { @MainActor in
+            if success { flow.showOrderResult(orderId: orderId) }
+        }
     }
 })
 ```
@@ -436,38 +395,49 @@ if ESimsAvailability.isAvailable && ESimsAvailability.isDeviceESimCapable {
 > `isDeviceESimCapable` is always `false` on the Simulator, which has no eUICC. Test
 > device gating on hardware.
 
+### Errors
+
+`onFail` receives an `ESimFlowError`:
+
+```swift
+public struct ESimFlowError: Sendable {
+    public let code: ESimErrorCode
+    public let message: String
+    public let isRetryable: Bool
+    public let httpStatusCode: Int?
+}
+```
+
+Codes reported in this release:
+
+| `ESimErrorCode` | Raw value | When | `message` |
+|-----------------|-----------|------|-----------|
+| `.orderCreationFailed` | `ORDER_CREATION_FAILED` | Buying the plan failed | Localized, safe to show |
+| `.orderConfirmationFailed` | `ORDER_CONFIRMATION_FAILED` | The activation screen could not load the order | Localized, safe to show |
+| `.userIdRequired` | `USER_ID_REQUIRED` | `showMyESims` was called without a `userId` | English, for developers |
+
+The other cases (`.networkError`, `.unauthorized`, `.forbidden`, `.notFound`,
+`.serverError`, `.parseError`, `.unknown`) are reserved and not reported yet.
+`httpStatusCode` is currently always `nil`.
+
+Other recoverable problems, like a dropped connection while browsing, are shown in the
+SDK screens with a retry button and never reach `onFail`. The activation screen is the
+exception: when the order cannot load, it shows **Try again** and **Close** and also
+reports `.orderConfirmationFailed` to `onFail`, once per failed attempt. Use `onFail` to
+log it; closing the screen from `onFail` takes the retry away from the user. **Close**
+fires `onComplete(orderId)`.
+
+Use `@unknown default` when you `switch` over `ESimErrorCode`, so new cases never break
+your build.
+
 ### UIKit Integration
 
 ```swift
-final class BookingViewController: UIViewController {
-    private var flightsFlow: FlightsFlow?
-    private var hotelsFlow: HotelsFlow?
+final class TravelViewController: UIViewController {
     private var esimFlow: ESimsFlow?
 
-    func startFlights() {
-        guard let nav = navigationController else { return }
-        let flow = FlightsFlow()
-        flightsFlow = flow
-        flow.start(from: nav, onComplete: { [weak self] orderId in
-            self?.handleComplete(orderId)
-        }, onCancel: { [weak self] in
-            self?.navigationController?.popToRootViewController(animated: true)
-        })
-    }
-
-    func startHotels() {
-        guard let nav = navigationController else { return }
-        let flow = HotelsFlow()
-        hotelsFlow = flow
-        flow.start(from: nav, onComplete: { [weak self] confirmationNumber in
-            self?.handleComplete(confirmationNumber)
-        }, onCancel: { [weak self] in
-            self?.navigationController?.popToRootViewController(animated: true)
-        })
-    }
-
     func startESim() {
-        guard let nav = navigationController else { return }
+        guard let nav = navigationController, ESimsAvailability.isAvailable else { return }
         let flow = ESimsFlow(
             navigationController: nav,
             onComplete: { [weak self] orderId in self?.handleComplete(orderId) },
@@ -476,14 +446,16 @@ final class BookingViewController: UIViewController {
         esimFlow = flow
         flow.start(onProcessPayment: { orderId in
             PaymentService.processPayment(orderId: orderId) { success in
-                if success { flow.showOrderResult(orderId: orderId) }
+                Task { @MainActor in
+                    if success { flow.showOrderResult(orderId: orderId) }
+                }
             }
         })
     }
 
     /// Opens eSIM history straight from your own orders tab.
     func showMyESims() {
-        guard let nav = navigationController else { return }
+        guard let nav = navigationController, ESimsAvailability.isAvailable else { return }
         let flow = ESimsFlow(
             navigationController: nav,
             onComplete: { [weak self] orderId in self?.handleComplete(orderId) },
@@ -492,7 +464,9 @@ final class BookingViewController: UIViewController {
         esimFlow = flow
         flow.showMyESims(onProcessPayment: { orderId in
             PaymentService.processPayment(orderId: orderId) { success in
-                if success { flow.showOrderResult(orderId: orderId) }
+                Task { @MainActor in
+                    if success { flow.showOrderResult(orderId: orderId) }
+                }
             }
         })
     }
@@ -501,246 +475,140 @@ final class BookingViewController: UIViewController {
 
 ### SwiftUI Integration
 
-The SDK provides ready-to-use SwiftUI views:
+Two views are available:
+
+```swift
+/// The browse-and-buy flow (destination → plans → detail → onProcessPayment).
+public struct ESimsFlowView: UIViewControllerRepresentable {
+    public init(
+        localization: ESimsLocalization = DefaultESimsLocalization(),
+        onComplete: @escaping (String) -> Void,
+        onProcessPayment: @escaping (String) -> Void,
+        onFail: @escaping (ESimFlowError) -> Void
+    )
+}
+
+/// The activation screen for a paid order.
+public struct ESimOrderDetailsView: UIViewControllerRepresentable {
+    public init(
+        orderId: String,
+        localization: ESimsLocalization = DefaultESimsLocalization(),
+        onComplete: @escaping (String) -> Void,
+        onFail: @escaping (ESimFlowError) -> Void
+    )
+}
+```
+
+`ESimsFlowView` has no `showOrderResult` hook. Once payment succeeds, show
+`ESimOrderDetailsView` for that order ID. Present the flow as a `.sheet` (or add your
+own close button), because its first screen has no dismiss control.
 
 ```swift
 import Gate2TravelSDK
 
 struct ContentView: View {
-    @State private var showFlights = false
-    @State private var showHotels = false
     @State private var showESim = false
+    @State private var paidOrderId: String?
 
     var body: some View {
-        VStack(spacing: 20) {
-            Button("Book Flight") { showFlights = true }
-            Button("Book Hotel") { showHotels = true }
-            Button("Buy eSIM") { showESim = true }
-        }
-        .fullScreenCover(isPresented: $showFlights) {
-            FlightsFlowView(
-                onComplete: { orderId in showFlights = false },
-                onCancel: { showFlights = false }
-            ).ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showHotels) {
-            HotelsFlowView(
-                onComplete: { confirmationNumber in showHotels = false },
-                onCancel: { showHotels = false }
-            ).ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showESim) {
-            ESimsFlowView(
-                onComplete: { orderId in showESim = false },
-                onProcessPayment: { orderId in
-                    PaymentService.processPayment(orderId: orderId) { _ in }
-                },
-                onFail: { error in showESim = false }
-            ).ignoresSafeArea()
-        }
+        Button("Buy eSIM") { showESim = true }
+            .disabled(!ESimsAvailability.isAvailable)
+            .sheet(isPresented: $showESim, onDismiss: { paidOrderId = nil }) {
+                if let orderId = paidOrderId {
+                    ESimOrderDetailsView(
+                        orderId: orderId,
+                        onComplete: { _ in showESim = false },
+                        onFail: { error in print("eSIM error: \(error.message)") }
+                    )
+                } else {
+                    ESimsFlowView(
+                        onComplete: { _ in showESim = false },
+                        onProcessPayment: { orderId in
+                            PaymentService.processPayment(orderId: orderId) { success in
+                                Task { @MainActor in
+                                    if success { paidOrderId = orderId }
+                                }
+                            }
+                        },
+                        onFail: { error in print("eSIM error: \(error.message)") }
+                    )
+                }
+            }
     }
 }
 ```
 
+My eSIMs has no SwiftUI view. To open it from SwiftUI, wrap a `UINavigationController`
+in your own `UIViewControllerRepresentable` and call `ESimsFlow.showMyESims` on it.
+
 ---
 
-## 7. Theming
+## 7. Appearance
 
-### Structure
+The SDK uses its built-in Gate2 theme, which adapts to light and dark mode
+automatically. Custom colors cannot be configured in this release.
 
-```swift
-public struct Theme: Sendable {
-    public let colors: ThemeColors
-    public static let `default`: Theme
-
-    public init(colors: ThemeColors = .default)
-}
-```
-
-### ThemeColors Properties
-
-| Category | Properties |
-|----------|------------|
-| **Primary** | `primary`, `primaryVariant`, `primarySubtle` |
-| **Secondary** | `secondary`, `secondaryVariant` |
-| **Semantic** | `success`, `successSubtle`, `warning`, `warningSubtle`, `error`, `errorSubtle` |
-| **Background** | `background`, `backgroundSecondary`, `backgroundTertiary` |
-| **Surface** | `surface`, `inputBackground` |
-| **Text** | `textPrimary`, `textSecondary`, `textTertiary`, `textDisabled`, `textOnPrimary` |
-| **Border** | `border`, `borderSubtle`, `borderFocus` |
-| **Icon** | `iconPrimary`, `iconSecondary` |
-| **Overlay** | `scrim` |
-
-### Example
-
-```swift
-import SwiftUI
-
-let customTheme = Theme(
-    colors: ThemeColors(
-        primary: .blue,
-        primaryVariant: Color(red: 0.1, green: 0.3, blue: 0.8),
-        primarySubtle: Color.blue.opacity(0.1),
-        secondary: .gray,
-        secondaryVariant: Color(white: 0.3),
-        success: .green,
-        successSubtle: Color.green.opacity(0.1),
-        warning: .orange,
-        warningSubtle: Color.orange.opacity(0.1),
-        error: .red,
-        errorSubtle: Color.red.opacity(0.1),
-        background: .white,
-        backgroundSecondary: Color(white: 0.97),
-        backgroundTertiary: Color(white: 0.95),
-        surface: .white,
-        inputBackground: .white,
-        textPrimary: .black,
-        textSecondary: .gray,
-        textTertiary: Color(white: 0.5),
-        textDisabled: Color(white: 0.7),
-        textOnPrimary: .white,
-        border: Color(white: 0.9),
-        borderSubtle: Color(white: 0.95),
-        borderFocus: .blue,
-        iconPrimary: Color(white: 0.2),
-        iconSecondary: Color(white: 0.5),
-        scrim: Color.black.opacity(0.5)
-    )
-)
-
-do {
-    try Gate2Travel.configure(
-        apiKey: "your-api-key",
-        sessionId: "user-session-id",
-        userId: "user-id",
-        theme: customTheme
-    )
-} catch {
-    print("SDK configuration failed: \(error)")
-}
-```
-
-The default theme automatically adapts to light/dark mode.
+For the navigation bar, the SDK uses the system back button on the
+`UINavigationController` you pass in, so your own navigation bar appearance settings
+apply to it. Two exceptions: the Welcome (terms) screen draws a transparent bar with
+its own white back chevron over its artwork, and the activation screen has no back
+button — the user leaves it with **Done**, which fires `onComplete`.
 
 ---
 
 ## 8. Localization
 
-The SDK includes built-in support for English, Russian, and Azerbaijani through String Catalogs.
+The SDK ships English, Russian, and Azerbaijani translations for every eSIM screen.
 
-### Default Localization
+### Choosing the Language
+
+By default the SDK follows the system locale. To control it, pass `language:` to
+`configure`. The closure is called each time the SDK resolves a string or sends a
+request, so screens opened after an in-app language switch use the new language. A
+screen that is already open, and content it already loaded from the server, keeps its
+current language until it is opened again:
 
 ```swift
-do {
-    try Gate2Travel.configure(
-        apiKey: "your-api-key",
-        sessionId: "user-session-id",
-        userId: "user-id"
-    )
-} catch {
-    print("SDK configuration failed: \(error)")
-}
+try Gate2Travel.configure(
+    apiKey: "your-api-key",
+    environment: .production,
+    sessionId: "user-session-id",
+    userId: "user-id",
+    language: { AppSettings.shared.language.g2tLanguage }
+)
 ```
 
 ### Custom Translations
 
-Implement `SDKLocalizationProvider` with custom localization providers:
+To replace the bundled strings, implement `ESimsLocalization` and pass it to the
+entry point you use. The `localization:` parameter of `configure` does not affect eSIM
+screens.
 
 ```swift
-struct MyLocalization: SDKLocalizationProvider {
-    let common: CommonLocalization = MyCommonLocalization()
-    let flights: FlightsLocalization = MyFlightsLocalization()
+struct MyESimsLocalization: ESimsLocalization {
+    var welcomeTitle: String { "Stay connected abroad" }
+    // ... implement every required member of ESimsLocalization
 }
 
-struct MyCommonLocalization: CommonLocalization {
-    var ok: String { "OK" }
-    var cancel: String { "Cancel" }
-    var error: String { "Error" }
-    var loading: String { "Loading..." }
-    var retry: String { "Retry" }
-    var search: String { "Search" }
-    var done: String { "Done" }
-    var back: String { "Back" }
-    var next: String { "Next" }
-    var confirm: String { "Confirm" }
-    var errorNoConnection: String { "No internet connection" }
-    var errorGeneric: String { "Something went wrong" }
-}
-
-struct MyFlightsLocalization: FlightsLocalization {
-    var searchTitle: String { "Find Flights" }
-    var searchFrom: String { "From" }
-    var searchTo: String { "To" }
-    // ... implement all required properties
-}
-
-do {
-    try Gate2Travel.configure(
-        apiKey: "your-api-key",
-        sessionId: "user-session-id",
-        userId: "user-id",
-        localization: MyLocalization()
-    )
-} catch {
-    print("SDK configuration failed: \(error)")
-}
-```
-
-### Feature-Specific Localization
-
-You can also provide custom localization directly to each flow:
-
-```swift
-let flightsFlow = FlightsFlow(localization: MyFlightsLocalization())
-let hotelsFlow = HotelsFlow(localization: MyHotelsLocalization())
-let esimFlow = ESimsFlow(
+let flow = ESimsFlow(
     navigationController: nav,
     onComplete: { _ in },
     onFail: { _ in },
     localization: MyESimsLocalization()
 )
+
+// SwiftUI
+ESimsFlowView(localization: MyESimsLocalization(), onComplete: { _ in }, onProcessPayment: { _ in }, onFail: { _ in })
+ESimOrderDetailsView(orderId: orderId, localization: MyESimsLocalization(), onComplete: { _ in }, onFail: { _ in })
 ```
+
+Members added in later releases come with English defaults, so a custom implementation
+keeps compiling after an upgrade. Check the [Migration](#11-migration) notes for new
+strings to translate.
 
 ---
 
-## 9. Booking Flows
-
-### Flights Flow
-
-```
-SEARCH → RESULTS → DETAIL → TRAVELERS → REVIEW → CONFIRMATION
-                                                       │
-                                                       ▼
-                                             onComplete(orderId)
-```
-
-| Screen | Purpose |
-|--------|---------|
-| **Search** | Enter origin, destination, dates, passengers, cabin class |
-| **Results** | View available flights with sorting options |
-| **Detail** | Confirm price, view itinerary and baggage info |
-| **Travelers** | Enter passenger information and documents |
-| **Review** | Verify all details before booking |
-| **Confirmation** | PNR and order confirmation |
-
-### Hotels Flow
-
-```
-SEARCH → RESULTS → DETAIL → GUEST DETAILS → CONFIRMATION
-                                                  │
-                                                  ▼
-                                    onComplete(confirmationNumber)
-```
-
-| Screen | Purpose |
-|--------|---------|
-| **Search** | Enter location, dates, rooms, guests, nationality |
-| **Results** | View available hotels with sorting/filtering |
-| **Detail** | Select room, view amenities, cancellation policy |
-| **Guest Details** | Enter guest information and contact details |
-| **Confirmation** | Booking confirmation number and details |
-
-### eSIM Flow
+## 9. eSIM Flow
 
 The SDK never collects card details. It creates the order, hands you the order ID,
 and waits for you to call `showOrderResult(orderId:)`.
@@ -749,17 +617,20 @@ and waits for you to call `showOrderResult(orderId:)`.
 start(onProcessPayment:)
 
   WELCOME → DESTINATION → PLANS → DETAIL
-  (first run)                       │
-                                    ▼
-                          onProcessPayment(orderId)   ← you take payment here
-                                    │
-                                    ▼
-                        showOrderResult(orderId:)
-                                    │
-                                 RESULT
-                                    │
-                                    ▼
-                          onComplete(orderId)
+  (first run)    │                  │
+                 │                  ▼
+                 │        onProcessPayment(orderId)   ← you take payment here
+                 │                  │
+                 │                  ▼
+                 │        showOrderResult(orderId:)
+                 │                  │
+                 │               RESULT
+                 │                  │
+                 │                  ▼
+                 │        onComplete(orderId)
+                 │
+                 ├──▶ MY ESIMS → ESIM DETAIL   (when a userId is set and the user has an eSIM)
+                 └──▶ FAQ
 
 
 showMyESims(onProcessPayment:)
@@ -770,19 +641,26 @@ showMyESims(onProcessPayment:)
 | Screen | Purpose |
 |--------|---------|
 | **Welcome** | Terms and introduction. Shown once, before the first purchase. |
-| **Destination** | Select country or region for eSIM coverage |
-| **Plans** | Browse data plans — data amount, validity, price, and any discount |
-| **Detail** | Coverage, features, device compatibility, and the buy action |
+| **Destination** | Select a country or region. Shows your promotional banners and, when a `userId` is configured and the user already has an eSIM, their latest eSIM with a link to My eSIMs. |
+| **Plans** | Browse data plans — data amount, validity, price, any discount — with filters and the device compatibility check |
+| **Detail** | Data, validity, network, speed, coverage, and the buy action |
 | **Result** | QR code for installation + direct install option (iOS 17.4+) |
 | **My eSIMs** | Purchased eSIMs, with data usage and status |
 | **eSIM Detail** | Activation details, install steps, and top-up |
+| **FAQ** | Common questions about eSIMs |
+
+#### Promotional Banners
+
+The Destination screen shows the promotional banners set up in your merchant settings
+with Gate2 Travel, in the user's current language. There is nothing to enable in code.
+When no banner is set up, or it cannot load, the space is hidden.
 
 #### Discounted Pricing
 
-When the backend returns a discounted price for a plan, the plan card and the plan
-detail header show the pre-discount price struck through next to the price the user
-actually pays, plus a badge with the percentage off. The Buy Now button shows only
-the payable price.
+When a plan is discounted, the plan card shows the pre-discount price struck through
+next to the price the user actually pays, plus a badge with the percentage off. The
+plan detail header shows the payable price with the pre-discount price struck through
+below it. The Buy Now button shows only the payable price.
 
 This is automatic — there is nothing to enable, and the order is created at the
 discounted price.
@@ -801,89 +679,83 @@ import Gate2TravelSDK
 struct TravelApp: App {
     @StateObject private var appState = AppState()
 
-    init() {
-        do {
-            try Gate2Travel.configure(
-                apiKey: ProcessInfo.processInfo.environment["GATE2_API_KEY"] ?? "",
-                sessionId: "user-session-id",
-                userId: "user-id",
-                logLevels: [.error]
-            )
-            appState.isReady = true
-        } catch {
-            print("SDK configuration failed: \(error)")
-        }
-    }
-
     var body: some Scene {
         WindowGroup {
             if appState.isReady {
                 ContentView().environmentObject(appState)
             } else {
                 ProgressView("Loading...")
+                    .task { appState.configureSDK() }
             }
         }
     }
 }
 
+@MainActor
 final class AppState: ObservableObject {
-    @Published var isReady = false
-    @Published var lastBookingId: String?
+    @Published private(set) var isReady = false
+    @Published var lastOrderId: String?
+
+    func configureSDK() {
+        do {
+            try Gate2Travel.configure(
+                apiKey: ProcessInfo.processInfo.environment["GATE2_API_KEY"] ?? "",
+                environment: .production,
+                sessionId: "user-session-id",
+                userId: "user-id",
+                consoleLevels: [.error]
+            )
+            isReady = true
+        } catch {
+            print("SDK configuration failed: \(error)")
+        }
+    }
 }
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showFlights = false
-    @State private var showHotels = false
     @State private var showESim = false
+    @State private var paidOrderId: String?
 
     var body: some View {
         VStack(spacing: 20) {
             Text("Travel App").font(.largeTitle)
 
-            Button("Book Flight") { showFlights = true }
-                .buttonStyle(.borderedProminent)
+            if ESimsAvailability.isDeviceESimCapable {
+                Button("Buy eSIM") { showESim = true }
+                    .buttonStyle(.borderedProminent)
+            }
 
-            Button("Book Hotel") { showHotels = true }
-                .buttonStyle(.bordered)
-
-            Button("Buy eSIM") { showESim = true }
-                .buttonStyle(.bordered)
-
-            if let bookingId = appState.lastBookingId {
-                Text("Last Booking: \(bookingId)").font(.caption)
+            if let orderId = appState.lastOrderId {
+                Text("Last eSIM order: \(orderId)").font(.caption)
             }
         }
-        .fullScreenCover(isPresented: $showFlights) {
-            FlightsFlowView(
-                onComplete: { orderId in
-                    appState.lastBookingId = orderId
-                    showFlights = false
-                },
-                onCancel: { showFlights = false }
-            ).ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showHotels) {
-            HotelsFlowView(
-                onComplete: { confirmationNumber in
-                    appState.lastBookingId = confirmationNumber
-                    showHotels = false
-                },
-                onCancel: { showHotels = false }
-            ).ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showESim) {
-            ESimsFlowView(
-                onComplete: { orderId in
-                    appState.lastBookingId = orderId
-                    showESim = false
-                },
-                onProcessPayment: { orderId, completion in
-                    PaymentService.processPayment(orderId: orderId) { success in
-                        completion(success)
-                    }
-                }
-            ).ignoresSafeArea()
+        .sheet(isPresented: $showESim, onDismiss: { paidOrderId = nil }) {
+            if let orderId = paidOrderId {
+                ESimOrderDetailsView(
+                    orderId: orderId,
+                    onComplete: { orderId in
+                        appState.lastOrderId = orderId
+                        showESim = false
+                    },
+                    onFail: { error in print("eSIM error: \(error.message)") }
+                )
+            } else {
+                ESimsFlowView(
+                    onComplete: { orderId in
+                        appState.lastOrderId = orderId
+                        showESim = false
+                    },
+                    onProcessPayment: { orderId in
+                        PaymentService.processPayment(orderId: orderId) { success in
+                            Task { @MainActor in
+                                if success { paidOrderId = orderId }
+                            }
+                        }
+                    },
+                    onFail: { error in print("eSIM error: \(error.message)") }
+                )
+            }
         }
     }
 }
@@ -893,9 +765,34 @@ struct ContentView: View {
 
 ## 11. Migration
 
+### Upgrading to 1.9.0
+
+No code changes are needed.
+
+#### Custom localization: one new string
+
+If you implement `ESimsLocalization` yourself, one member was added for the
+promotional banners. It has an English default, so **your code still compiles** — but
+it will ship untranslated English until you override it:
+
+| Member | English default |
+|--------|-----------------|
+| `accessibilityPromoBanner` | `Promotional banner` |
+
+### New in 1.9.0
+
+- Promotional banners on the eSIM main page, shown automatically from your merchant settings
+
 ### Upgrading to 1.8.0
 
-Most apps need no changes. Two items are source-breaking in narrow cases.
+Most apps need no changes. One item is source-breaking in a narrow case.
+
+#### Blank `userId` now means "no user"
+
+A `userId` that is empty or only whitespace is now treated as missing. The
+Destination screen hides its My eSIMs shortcut, and `showMyESims` reports
+`ESimErrorCode.userIdRequired`. Pass the real user identifier to
+`Gate2Travel.configure(...)` if you want My eSIMs and top-up to appear.
 
 #### `ESimErrorCode` has a new case
 
@@ -904,15 +801,17 @@ Most apps need no changes. Two items are source-breaking in narrow cases.
 `default`, your switch is no longer exhaustive and will not compile:
 
 ```swift
-// Before — compiled against 1.7.0, fails on 1.8.0
+// Before — lists every 1.7.0 case with no default; compiled on 1.7.0, fails on 1.8.0
 switch error.code {
-case .networkError: …
+case .networkError, .unauthorized, .forbidden, .notFound, .serverError, .parseError: …
+case .orderCreationFailed, .orderConfirmationFailed: …
 case .unknown: …
 }
 
 // After — add @unknown default, and future cases will never break you again
 switch error.code {
-case .networkError: …
+case .networkError, .unauthorized, .forbidden, .notFound, .serverError, .parseError: …
+case .orderCreationFailed, .orderConfirmationFailed: …
 case .unknown: …
 @unknown default: reportUnexpected(error)
 }
@@ -920,14 +819,6 @@ case .unknown: …
 
 You are unaffected if you read `error.message`, read `error.code.rawValue`,
 compare with `==`, or already use `default` / `@unknown default`.
-
-#### `ConfirmOrderResponseDTO.amount` is now `Decimal?`
-
-It was `Double?`. This only affects code using `@_spi(Gate2Internal) import
-Gate2TravelCore` and reading `.amount` — the internal surface, not the supported
-API. Monetary values are `Decimal` throughout the SDK so prices survive decoding
-exactly; `Double` cannot represent most decimal amounts (`2040.88` becomes
-`2040.8800000000000512`).
 
 #### Custom localization: three new strings
 
@@ -937,9 +828,9 @@ discounted pricing. They have English defaults, so **your code still compiles**
 
 | Member | English default |
 |--------|-----------------|
-| `plansDiscountBadge(_:)` | `20% discount` |
-| `accessibilityDiscountOriginalPrice(_:)` | `Was ₼4.40` |
-| `accessibilityDiscountPercent(_:)` | `20% off` |
+| `plansDiscountBadge(_:)` | `20% discount` (receives `"20"` — the number only; add `%` in your copy) |
+| `accessibilityDiscountOriginalPrice(_:)` | `Was 4.40 ₼` (receives the formatted pre-discount price) |
+| `accessibilityDiscountPercent(_:)` | `20% off` (receives `"20"` — the number only) |
 
 ### New in 1.8.0
 
@@ -961,8 +852,8 @@ discounted pricing. They have English defaults, so **your code still compiles**
 
 <div align="center">
 
-**Gate2 Travel SDK** • iOS 15.0+ • Swift 5.9+
+**Gate2 Travel SDK** • iOS 15.0+ • Swift 6.2+
 
-© 2025 Gate2 Travel
+© 2026 Gate2 Travel
 
 </div>
